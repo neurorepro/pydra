@@ -64,6 +64,8 @@ from .helpers import (
     position_sort,
     argstr_formatting,
     output_from_inputfields,
+    list_to_cmdstring,
+
 )
 from .helpers_file import template_update, is_local_file
 
@@ -441,7 +443,7 @@ class ShellCommandTask(TaskBase):
                 # in case there are ... when input is not a list
                 argstr = argstr.replace("...", "")
                 if isinstance(value, list):
-                    cmd_el_str = sep.join([str(val) for val in value])
+                    cmd_el_str = sep.join([list_to_cmdstring(value)])
                     value = cmd_el_str
                 # if argstr has a more complex form, with "{input_field}"
                 if "{" in argstr and "}" in argstr:

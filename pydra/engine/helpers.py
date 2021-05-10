@@ -882,6 +882,8 @@ def argstr_formatting(argstr, inputs, value_updates=None):
             # if value is NOTHING, nothing should be added to the command
             val_dict[fld_name] = ""
         else:
+            if isinstance(fld_value, list):
+                fld_value = list_to_cmdstring(fld_value)
             val_dict[fld_name] = fld_value
 
     # formatting string based on the val_dict
@@ -921,3 +923,24 @@ class PydraFileLock:
     async def __aexit__(self, exc_type, exc_value, traceback):
         self.lock.release()
         return None
+
+def list_to_cmdstring(l):
+    """
+    Converts a list containing strings to a string representation of that list without containing extra ".
+    Unless they are \"
+
+    >>> str([5,6,["a", "b"]])
+    "[5, 6, ['a', 'b']]"
+    >>> str([5,6,["a", "b"]])
+    '[5,6,[a,b]]'
+
+    """
+    lstr = "["
+    for el in l:
+        if isinstance(el, list):
+            el = list_to_cmdstring(el)
+        lstr += str(el)
+        lstr += ","
+    # replacing the last comma with a closing bracket.
+    lstr = lstr[:-1] + "]"
+    return lstr
