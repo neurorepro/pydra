@@ -931,7 +931,7 @@ def list_to_cmdstring(l):
 
     >>> str([5,6,["a", "b"]])
     "[5, 6, ['a', 'b']]"
-    >>> str([5,6,["a", "b"]])
+    >>> list_to_cmdstring([5,6,["a", "b"]])
     '[5,6,[a,b]]'
 
     """
