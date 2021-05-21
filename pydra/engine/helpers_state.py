@@ -507,9 +507,13 @@ def splits(splitter_rpn, inputs, inner_inputs=None, cont_dim=None):
                 # TODO: rewrite once I have more tests
                 if isinstance(terms[lr], str) and terms[lr] in inner_inputs:
                     # TODO: have to be changed if differ length
-                    inner_len = [shape[lr][-1]] * reduce(
-                        lambda x, y: x * y, shape[lr][:-1]
-                    )
+                    print(shape, lr)
+                    if not len(shape[lr][:-1]) == 0:
+                        inner_len = [shape[lr][-1]] * reduce(
+                            lambda x, y: x * y, shape[lr][:-1]
+                        )
+                    else:
+                        inner_len = [shape[lr][-1]]
                     # this come from the previous node
                     outer_ind = inner_inputs[terms[lr]].ind_l
                     trmval_out = itertools.chain.from_iterable(
