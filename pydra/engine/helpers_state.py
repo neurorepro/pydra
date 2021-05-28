@@ -474,6 +474,7 @@ def splits(splitter_rpn, inputs, inner_inputs=None, cont_dim=None):
 
             # checking shapes and creating newshape
             if token == ".":
+                print(shape["L"], shape["R"])
                 if shape["L"] != shape["R"]:
                     raise ValueError(
                         "Operands {} and {} do not have same shape.".format(
@@ -549,7 +550,11 @@ def _single_op_splits(
     trmval = range(reduce(lambda x, y: x * y, shape))
     if op_single in inner_inputs:
         # TODO: have to be changed if differ length
-        inner_len = [shape[-1]] * reduce(lambda x, y: x * y, shape[:-1])
+        print(shape)
+        if not len(shape[:-1]) == 0:
+            inner_len = [shape[-1]] * reduce(lambda x, y: x * y, shape[:-1])
+        else:
+            inner_len = [shape[-1]]
         # this come from the previous node
         outer_ind = inner_inputs[op_single].ind_l
         op_out = itertools.chain.from_iterable(

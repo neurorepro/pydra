@@ -1134,7 +1134,7 @@ class Workflow(TaskBase):
                 else:
                     raise ValueError(
                         f"Task {val.name} raised an error, "
-                        f"full crash report is here: {getattr(self, val.name).output_dir / '_error.pklz'}"
+                        + f"full crash report is here: {getattr(self, val.name).output_dir}"
                     )
         return attr.evolve(output, **output_wf)
 
