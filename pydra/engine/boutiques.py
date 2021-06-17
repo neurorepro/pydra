@@ -9,7 +9,7 @@ from copy import deepcopy
 from ..utils.messenger import AuditFlag
 from ..engine import ShellCommandTask
 from ..engine.specs import SpecInfo, ShellSpec, ShellOutSpec, File, attr_fields
-from .helpers_file import is_local_file, template_update_single
+from .helpers_file import is_local_file, _template_formatting
 from .specs import attr_fields
 from .helpers import make_klass
 
@@ -188,6 +188,13 @@ class BoshTask(ShellCommandTask):
                     )
 
             self._input_spec_keys[input["value-key"]] = "{" + f"{name}" + "}"
+
+        boutputs = self.bosh_spec.get("output-files", None)
+        if not boutputs:
+            return SpecInfo(name="Outputs", fields=[], bases=(ShellOutSpec,))
+        fields = []
+        for output in boutputs:
+            pass
         if names_subset:
             raise RuntimeError(f"{names_subset} are not in the zenodo input spec")
         spec = SpecInfo(name="Inputs", fields=fields, bases=(ShellSpec,))
@@ -229,17 +236,7 @@ class BoshTask(ShellCommandTask):
                     "path-template-stripped-extensions": exts
                 }
 
-                def find_special_out(field, output_dir, inputs):
-                    mdata["output_file_template"] = path_template
-                    fields = [(name, attr.ib(type=File, metadata=mdata))]
-                    spec = SpecInfo(
-                        name="Outputs", fields=fields, bases=(ShellOutSpec,)
-                    )
-                    spec = make_klass(spec)
-                    bspec = attr_fields(
-                        spec, exclude_names=("return_code", "stdout", "stderr")
-                    )
-                    fld = bspec[0]
+                def input_callable(field, inputs):
                     inputs = deepcopy(inputs)
                     dict_ = attr.asdict(inputs)
                     for k, v in dict_.items():
@@ -248,15 +245,10 @@ class BoshTask(ShellCommandTask):
                                 v = v.replace(ext, "")
                             dict_[k] = v
                     inputs = attr.evolve(inputs, **dict_)
-                    new_value = template_update_single(
-                        fld, inputs, output_dir=output_dir, spec_type="output"
-                    )
-                    ret = Path(new_value)
-                    if ret.exists():
-                        return ret
-                    else:
-                        return attr.NOTHING
+                    new_value = _template_formatting(field, inputs, inputs)
+                    return new_value
 
+                # _template_formatting is called inside template_update_single   _template_formatting(field, inputs, inputs_dict_st)
                 mdata["callable"] = find_special_out
                 del mdata["output_file_template"]  # = None
 

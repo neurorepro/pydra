@@ -304,7 +304,7 @@ def test_boutiques_specs_extension_wf(plugin, tmpdir):
 @no_win
 @need_bosh_docker
 @pytest.mark.flaky(reruns=3)
-def test_boutiques_specs_2(plugin, tmpdir):
+def test_boutiques_specs_1(plugin, tmpdir):
     """also tests for if no output-files are provided"""
     cpath = Path(__file__).parent.absolute()
     test_file = cpath / "aux_files/boutiques_specs_test_2.json"
