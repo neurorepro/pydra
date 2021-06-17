@@ -4,11 +4,14 @@ import attr
 from urllib.request import urlretrieve
 from pathlib import Path
 from functools import reduce
+from copy import deepcopy
 
 from ..utils.messenger import AuditFlag
 from ..engine import ShellCommandTask
 from ..engine.specs import SpecInfo, ShellSpec, ShellOutSpec, File, attr_fields
-from .helpers_file import is_local_file
+from .helpers_file import is_local_file, template_update_single
+from .specs import attr_fields
+from .helpers import make_klass
 
 
 class BoshTask(ShellCommandTask):
@@ -19,6 +22,7 @@ class BoshTask(ShellCommandTask):
         zenodo_id=None,
         bosh_file=None,
         audit_flags: AuditFlag = AuditFlag.NONE,
+        bindings=[],
         cache_dir=None,
         input_spec_names: ty.Optional[ty.List] = None,
         messenger_args=None,
@@ -60,16 +64,28 @@ class BoshTask(ShellCommandTask):
         if (bosh_file and zenodo_id) or not (bosh_file or zenodo_id):
             raise Exception("either bosh or zenodo_id has to be specified")
         elif zenodo_id:
+            prefix = "zenodo."
+            if zenodo_id.startswith(prefix):
+                zenodo_id = zenodo_id[len(prefix) :]
             self.bosh_file = self._download_spec(zenodo_id)
         else:  # bosh_file
-            self.bosh_file = bosh_file
+            if isinstance(bosh_file, str):
+                self.bosh_file = Path(bosh_file)
+            elif isinstance(bosh_file, Path):
+                self.bosh_file = bosh_file
+            else:
+                raise Exception(
+                    "the given bosh_file is neither a string nor a path object"
+                )
 
         with self.bosh_file.open() as f:
             self.bosh_spec = json.load(f)
 
+        self._post_run_changes = {}
         self.input_spec = self._prepare_input_spec(names_subset=input_spec_names)
         self.output_spec = self._prepare_output_spec(names_subset=output_spec_names)
         self.bindings = ["-v", f"{self.bosh_file.parent}:{self.bosh_file.parent}:ro"]
+        self.add_input_bindigs(bindings)
 
         super().__init__(
             name=name,
@@ -86,6 +102,7 @@ class BoshTask(ShellCommandTask):
             **kwargs,
         )
         self.strip = strip
+        # self.hooks.__setattr__("post_run_task",post_run_patches)
 
     def _download_spec(self, zenodo_id):
         """
@@ -127,10 +144,13 @@ class BoshTask(ShellCommandTask):
                 tp = str
             elif input["type"] == "Number":
                 tp = float
+                if input.get("integer", False):
+                    tp = int
             elif input["type"] == "Flag":
                 tp = bool
             else:
                 tp = None
+            ti = tp  # copy in case tp gets changed to a list
             # adding list
             if tp and "list" in input and input["list"]:
                 tp = ty.List[tp]
@@ -140,7 +160,33 @@ class BoshTask(ShellCommandTask):
                 "mandatory": not input["optional"],
                 "argstr": input.get("command-line-flag", None),
             }
-            fields.append((name, tp, mdata))
+
+            if "default-value" in input:
+                default_val = input["default-value"]
+                # Setting the type of the default value
+                if ti is not File:
+                    if isinstance(default_val, ty.List):
+                        default_val = [ty.cast(ti, v) for v in default_val]
+                    else:
+                        default_val = ty.cast(tp, default_val)
+                # Cannot have mandatory spec with a default value.
+                mdata["mandatory"] = False
+                fields.append((name, tp, default_val, mdata))
+            else:
+                fields.append((name, tp, mdata))
+
+            if "list-separator" in input:
+                mdata["sep"] = input["list-separator"]
+
+            if "command-line-flag-separator" in input and tp != bool:
+                # overwriting previously set value
+                if mdata["argstr"] is not None:
+                    mdata["argstr"] = (
+                        mdata["argstr"]
+                        + input["command-line-flag-separator"]
+                        + "{name}"
+                    )
+
             self._input_spec_keys[input["value-key"]] = "{" + f"{name}" + "}"
         if names_subset:
             raise RuntimeError(f"{names_subset} are not in the zenodo input spec")
@@ -151,7 +197,10 @@ class BoshTask(ShellCommandTask):
         """creating output spec from the zenodo file
         if name_subset provided, only names from the subset will be used in the spec
         """
-        boutputs = self.bosh_spec["output-files"]
+
+        boutputs = self.bosh_spec.get("output-files", None)
+        if not boutputs:
+            return SpecInfo(name="Outputs", fields=[], bases=(ShellOutSpec,))
         fields = []
         for output in boutputs:
             name = output["id"]
@@ -171,8 +220,47 @@ class BoshTask(ShellCommandTask):
                 "mandatory": not output["optional"],
                 "output_file_template": path_template,
             }
-            fields.append((name, attr.ib(type=File, metadata=mdata)))
+            if "uses-absolute-path" in output:
+                mdata["absolute_path"] = output["uses-absolute-path"]
 
+            if "path-template-stripped-extensions" in output:
+                exts = output["path-template-stripped-extensions"]
+                self._post_run_changes[name] = {
+                    "path-template-stripped-extensions": exts
+                }
+
+                def find_special_out(field, output_dir, inputs):
+                    mdata["output_file_template"] = path_template
+                    fields = [(name, attr.ib(type=File, metadata=mdata))]
+                    spec = SpecInfo(
+                        name="Outputs", fields=fields, bases=(ShellOutSpec,)
+                    )
+                    spec = make_klass(spec)
+                    bspec = attr_fields(
+                        spec, exclude_names=("return_code", "stdout", "stderr")
+                    )
+                    fld = bspec[0]
+                    inputs = deepcopy(inputs)
+                    dict_ = attr.asdict(inputs)
+                    for k, v in dict_.items():
+                        if isinstance(v, str):
+                            for ext in exts:
+                                v = v.replace(ext, "")
+                            dict_[k] = v
+                    inputs = attr.evolve(inputs, **dict_)
+                    new_value = template_update_single(
+                        fld, inputs, output_dir=output_dir, spec_type="output"
+                    )
+                    ret = Path(new_value)
+                    if ret.exists():
+                        return ret
+                    else:
+                        return attr.NOTHING
+
+                mdata["callable"] = find_special_out
+                del mdata["output_file_template"]  # = None
+
+            fields.append((name, attr.ib(type=File, metadata=mdata)))
         if names_subset:
             raise RuntimeError(f"{names_subset} are not in the zenodo output spec")
         spec = SpecInfo(name="Outputs", fields=fields, bases=(ShellOutSpec,))
@@ -211,3 +299,15 @@ class BoshTask(ShellCommandTask):
             json.dump(input_json, jsonfile)
 
         return str(filename)
+
+    def add_input_bindigs(self, binings):
+        for binding in binings:
+            if len(binding) == 3:
+                lpath, cpath, mode = binding
+            elif len(binding) == 2:
+                lpath, cpath, mode = binding + ["rw"]
+            else:
+                raise Exception(
+                    f"binding should have length 2, 3, or 4, it has {len(binding)}"
+                )
+            self.bindings.extend(["-v", f"{lpath}:{cpath}:{mode}"])
